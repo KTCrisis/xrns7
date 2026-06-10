@@ -185,3 +185,25 @@ func TestParseRejectsGarbage(t *testing.T) {
 		t.Error("accepted LPB 0")
 	}
 }
+
+func TestInstrumentNames(t *testing.T) {
+	song, err := Parse(strings.NewReader(`<RenoiseSong>
+		<GlobalSongData><BeatsPerMin>120</BeatsPerMin><LinesPerBeat>4</LinesPerBeat></GlobalSongData>
+		<Instruments>
+			<Instrument><Name>VST: Serum (Pad)</Name></Instrument>
+			<Instrument><Name>None</Name></Instrument>
+		</Instruments>
+	</RenoiseSong>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := song.InstrumentName("00"); got != "VST: Serum (Pad)" {
+		t.Errorf("InstrumentName(00) = %q", got)
+	}
+	if got := song.InstrumentName("01"); got != "01" {
+		t.Errorf("InstrumentName(01) = %q, want raw index for None", got)
+	}
+	if got := song.InstrumentName("ZZ"); got != "ZZ" {
+		t.Errorf("InstrumentName(ZZ) = %q", got)
+	}
+}

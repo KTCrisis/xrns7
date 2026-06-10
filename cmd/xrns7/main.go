@@ -97,6 +97,14 @@ func info(s *xrns.Song) {
 			fmt.Printf("  %2d  %s\n", i, t.Name)
 		}
 	}
+	if len(s.Instruments) > 0 {
+		fmt.Println("\ninstruments:")
+		for i, name := range s.Instruments {
+			if name != "" && name != "None" {
+				fmt.Printf("  %02X  %s\n", i, name)
+			}
+		}
+	}
 	fmt.Println("\nsequence:")
 	for i, e := range s.Sequence {
 		mark := ""

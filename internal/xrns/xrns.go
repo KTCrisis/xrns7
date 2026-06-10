@@ -15,12 +15,13 @@ import (
 
 // Song is the symbolic content of an .xrns file.
 type Song struct {
-	Name     string
-	BPM      float64
-	LPB      int // lines per beat: the lines→beats conversion key
-	Tracks   []Track
-	Patterns []Pattern
-	Sequence []SeqEntry
+	Name        string
+	BPM         float64
+	LPB         int      // lines per beat: the lines→beats conversion key
+	Instruments []string // names, indexed by the hex instrument number in note cells
+	Tracks      []Track
+	Patterns    []Pattern
+	Sequence    []SeqEntry
 }
 
 // Track is one sequencer track, in file order. Pattern tracks align with this
@@ -71,6 +72,9 @@ type rawSong struct {
 		BeatsPerMin  float64 `xml:"BeatsPerMin"`
 		LinesPerBeat int     `xml:"LinesPerBeat"`
 	} `xml:"GlobalSongData"`
+	Instruments struct {
+		Names []string `xml:"Instrument>Name"`
+	} `xml:"Instruments"`
 	Tracks struct {
 		Items []rawTrack `xml:",any"`
 	} `xml:"Tracks"`
@@ -155,9 +159,10 @@ func Parse(r io.Reader) (*Song, error) {
 	}
 
 	s := &Song{
-		Name: raw.GlobalSongData.SongName,
-		BPM:  raw.GlobalSongData.BeatsPerMin,
-		LPB:  raw.GlobalSongData.LinesPerBeat,
+		Name:        raw.GlobalSongData.SongName,
+		BPM:         raw.GlobalSongData.BeatsPerMin,
+		LPB:         raw.GlobalSongData.LinesPerBeat,
+		Instruments: raw.Instruments.Names,
 	}
 	for _, t := range raw.Tracks.Items {
 		kind, ok := trackKinds[t.XMLName.Local]
@@ -239,4 +244,17 @@ func Velocity(volHex string) uint8 {
 		return 1
 	}
 	return uint8(v * 127 / 128)
+}
+
+// InstrumentName resolves a note cell's hex instrument index ("0B") to the
+// instrument's name. Unknown or unset indexes return the raw string.
+func (s *Song) InstrumentName(hexIdx string) string {
+	i, err := strconv.ParseUint(hexIdx, 16, 16)
+	if err != nil || int(i) >= len(s.Instruments) {
+		return hexIdx
+	}
+	if n := s.Instruments[i]; n != "" && n != "None" {
+		return n
+	}
+	return hexIdx
 }
