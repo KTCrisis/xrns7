@@ -16,8 +16,9 @@ type Note struct {
 	Midi       uint8   `json:"midi"`
 	Name       string  `json:"name"` // scientific pitch (C4 = 60)
 	Vel        uint8   `json:"v"`
-	Beats      float64 `json:"beats"` // duration
-	Instrument string  `json:"instr,omitempty"`
+	Beats      float64 `json:"beats"`                // duration
+	Instrument string  `json:"instr,omitempty"`      // hex index from the cell
+	InstrName  string  `json:"instrument,omitempty"` // resolved instrument name
 }
 
 // Selection narrows extraction: track names (empty = all note tracks) and a
@@ -126,6 +127,7 @@ func extractTrack(s *Song, pt PatternTrack, patLines int, track string, seqPos, 
 				Vel:        Velocity(ev.col.Volume),
 				Beats:      float64(end-ev.line) / float64(s.LPB),
 				Instrument: ev.col.Instrument,
+				InstrName:  s.InstrumentName(ev.col.Instrument),
 			})
 		}
 	}
