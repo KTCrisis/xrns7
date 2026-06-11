@@ -46,6 +46,7 @@ const fixtureXML = `<?xml version="1.0" encoding="UTF-8"?>
           <PatternTrack>
             <Lines>
               <Line index="0"><NoteColumns><NoteColumn><Note>D-3</Note></NoteColumn></NoteColumns></Line>
+              <Line index="12"><NoteColumns><NoteColumn><Note>A-3</Note></NoteColumn></NoteColumns></Line>
             </Lines>
           </PatternTrack>
           <PatternTrack></PatternTrack>
@@ -136,7 +137,9 @@ func TestOpenAndNotes(t *testing.T) {
 		t.Fatal(err)
 	}
 	// C-3 (cut by OFF at line 8), E-4 (cut by G-4), G-4 (to pattern end),
-	// D-3 in pattern 1 (offset 16 lines = beat 4).
+	// D-3 in pattern 1 (offset 16 lines = beat 4). The A-3 at line 12 of
+	// pattern 1 (8 lines) is hidden data beyond the pattern length: Renoise
+	// never plays it, so it must not appear nor shorten D-3.
 	type expect struct {
 		name  string
 		beat  float64

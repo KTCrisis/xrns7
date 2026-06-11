@@ -92,6 +92,13 @@ func extractTrack(s *Song, pt PatternTrack, patLines int, track string, seqPos, 
 	// duration = gap to the column's next event.
 	perCol := map[int][]columnEvent{}
 	for _, l := range pt.Lines {
+		// Renoise keeps cell data beyond the pattern length in the XML (lines
+		// hidden by a pattern shrink) but never plays it. Reading them would
+		// yield phantom notes past the pattern end and negative durations
+		// (end = patLines < line).
+		if l.Index >= patLines {
+			continue
+		}
 		for ci, c := range l.Columns {
 			if c.Note == "" {
 				continue
