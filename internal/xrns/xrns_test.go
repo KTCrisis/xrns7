@@ -171,6 +171,17 @@ func TestSelection(t *testing.T) {
 	if err != nil || len(lead) != 2 {
 		t.Fatalf("LEAD notes = %d (%v)", len(lead), err)
 	}
+	// case-insensitive + whitespace-tolerant: `--track lead ` must find LEAD
+	lower, err := song.Notes(Selection{Tracks: []string{" lead "}, From: 0, To: -1})
+	if err != nil || len(lower) != 2 {
+		t.Fatalf("' lead ' notes = %d (%v)", len(lower), err)
+	}
+	// a typo must error and list what exists, not return an empty extraction
+	if _, err := song.Notes(Selection{Tracks: []string{"PADS"}, From: 0, To: -1}); err == nil {
+		t.Error("unknown track accepted")
+	} else if !strings.Contains(err.Error(), "PADS") || !strings.Contains(err.Error(), "BASS, LEAD") {
+		t.Errorf("unknown-track error should name the typo and the tracks: %v", err)
+	}
 	p1, err := song.Notes(Selection{From: 1, To: 1})
 	if err != nil || len(p1) != 1 || p1[0].Name != "D2" || p1[0].Beat != 0 {
 		t.Fatalf("seq 1 notes = %+v (%v)", p1, err)
@@ -186,6 +197,19 @@ func TestParseRejectsGarbage(t *testing.T) {
 	}
 	if _, err := Parse(strings.NewReader(`<RenoiseSong><GlobalSongData><LinesPerBeat>0</LinesPerBeat></GlobalSongData></RenoiseSong>`)); err == nil {
 		t.Error("accepted LPB 0")
+	}
+	if _, err := Parse(strings.NewReader(`<RenoiseSong><GlobalSongData><LinesPerBeat>4</LinesPerBeat></GlobalSongData></RenoiseSong>`)); err == nil {
+		t.Error("accepted missing/zero BPM")
+	}
+}
+
+func TestDocVersionExposed(t *testing.T) {
+	song, err := Open(writeFixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if song.DocVersion != 66 {
+		t.Errorf("DocVersion = %d, want 66", song.DocVersion)
 	}
 }
 

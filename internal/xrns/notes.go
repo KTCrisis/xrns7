@@ -3,6 +3,7 @@ package xrns
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // Note is one extracted note event, positioned in beats.
@@ -29,16 +30,46 @@ type Selection struct {
 	To     int
 }
 
+// wantsTrack matches case-insensitively and ignores stray whitespace:
+// `--track bass` must find "BASS", not silently select nothing.
 func (sel Selection) wantsTrack(name string) bool {
 	if len(sel.Tracks) == 0 {
 		return true
 	}
 	for _, t := range sel.Tracks {
-		if t == name {
+		if strings.EqualFold(strings.TrimSpace(t), name) {
 			return true
 		}
 	}
 	return false
+}
+
+// checkTracks rejects selection names that match no note track, listing what
+// exists — a typo must be an error, not an empty extraction.
+func (s *Song) checkTracks(sel Selection) error {
+	var unknown, avail []string
+	for _, t := range s.Tracks {
+		if t.Kind == "track" {
+			avail = append(avail, t.Name)
+		}
+	}
+	for _, want := range sel.Tracks {
+		found := false
+		for _, name := range avail {
+			if strings.EqualFold(strings.TrimSpace(want), name) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			unknown = append(unknown, strings.TrimSpace(want))
+		}
+	}
+	if len(unknown) > 0 {
+		return fmt.Errorf("no track named %s (tracks: %s)",
+			strings.Join(unknown, ", "), strings.Join(avail, ", "))
+	}
+	return nil
 }
 
 // Notes extracts note events over the selected sequence range, in tracker
@@ -46,6 +77,9 @@ func (sel Selection) wantsTrack(name string) bool {
 // an OFF — or the end of its pattern (v1 simplification: notes do not ring
 // across pattern boundaries). Beats are relative to the range start.
 func (s *Song) Notes(sel Selection) ([]Note, error) {
+	if err := s.checkTracks(sel); err != nil {
+		return nil, err
+	}
 	if sel.To < 0 || sel.To >= len(s.Sequence) {
 		sel.To = len(s.Sequence) - 1
 	}

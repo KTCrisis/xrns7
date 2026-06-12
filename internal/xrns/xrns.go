@@ -13,9 +13,14 @@ import (
 	"strings"
 )
 
+// TestedDocVersion is the Renoise schema version this package is tested
+// against (Renoise 3.x). Other versions parse on a best-effort basis.
+const TestedDocVersion = 66
+
 // Song is the symbolic content of an .xrns file.
 type Song struct {
 	Name        string
+	DocVersion  int // Renoise schema version (doc_version attribute)
 	BPM         float64
 	LPB         int      // lines per beat: the lines→beats conversion key
 	Instruments []string // names, indexed by the hex instrument number in note cells
@@ -67,6 +72,7 @@ type SeqEntry struct {
 // raw XML mapping — kept separate from the public types so the schema's
 // shape doesn't leak into the API.
 type rawSong struct {
+	DocVersion     int `xml:"doc_version,attr"`
 	GlobalSongData struct {
 		SongName     string  `xml:"SongName"`
 		BeatsPerMin  float64 `xml:"BeatsPerMin"`
@@ -157,9 +163,13 @@ func Parse(r io.Reader) (*Song, error) {
 	if raw.GlobalSongData.LinesPerBeat <= 0 {
 		return nil, fmt.Errorf("bad LinesPerBeat %d", raw.GlobalSongData.LinesPerBeat)
 	}
+	if raw.GlobalSongData.BeatsPerMin <= 0 {
+		return nil, fmt.Errorf("bad BeatsPerMin %v", raw.GlobalSongData.BeatsPerMin)
+	}
 
 	s := &Song{
 		Name:        raw.GlobalSongData.SongName,
+		DocVersion:  raw.DocVersion,
 		BPM:         raw.GlobalSongData.BeatsPerMin,
 		LPB:         raw.GlobalSongData.LinesPerBeat,
 		Instruments: raw.Instruments.Names,
