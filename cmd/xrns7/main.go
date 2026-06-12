@@ -33,6 +33,10 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
+	if song.DocVersion != xrns.TestedDocVersion {
+		fmt.Fprintf(os.Stderr, "xrns7: doc_version %d non testé (référence %d) — lecture best-effort\n",
+			song.DocVersion, xrns.TestedDocVersion)
+	}
 
 	switch cmd {
 	case "info":
