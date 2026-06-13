@@ -22,12 +22,70 @@ type Note struct {
 	InstrName  string  `json:"instrument,omitempty"` // resolved instrument name
 }
 
-// Selection narrows extraction: track names (empty = all note tracks) and a
-// sequence range [From, To] inclusive (negative To = end of song).
+// Selection narrows extraction: track names to include (empty = all note
+// tracks), names to Drop (excluded outright), a sequence range [From, To]
+// inclusive (negative To = end of song), and NoDrums — drop notes a heuristic
+// reads as percussion. Keep force-includes tracks the heuristic would drop
+// (the escape hatch for its false positives, e.g. a pad on a kit sampler).
 type Selection struct {
-	Tracks []string
-	From   int
-	To     int
+	Tracks  []string
+	Drop    []string
+	Keep    []string
+	NoDrums bool
+	From    int
+	To      int
+}
+
+// drumTrackTokens are cryptic track-name abbreviations that denote percussion,
+// matched on the whole name once trailing digits are stripped (so H2/H3 → H).
+var drumTrackTokens = map[string]bool{
+	"K": true, "BD": true, "KICK": true, "SN": true, "SD": true, "SNR": true,
+	"H": true, "HH": true, "OH": true, "CH": true, "HAT": true, "CR": true,
+	"RD": true, "CY": true, "CYM": true, "TM": true, "PRC": true, "CLP": true,
+	"SHK": true, "RIM": true, "CLP1": true,
+}
+
+// drumWords are substrings that denote percussion in a descriptive track or
+// instrument name ("Hi Hat", "Battery 4 Kit", "808 Snare").
+var drumWords = []string{
+	"kick", "snare", "hihat", "hi-hat", "hat", "crash", "ride", "tom", "perc",
+	"drum", "kit", "cymbal", "clap", "snap", "rim", "tamb", "shaker", "clave",
+	"conga", "bongo", "808", "909", "707", "727", "battery",
+}
+
+// fxNoteThreshold: at or below this many notes over the whole song, a track is
+// likely an effect trigger (a one-shot riser/impact), not a played part.
+const fxNoteThreshold = 4
+
+func normTrackName(s string) string {
+	return strings.TrimRight(strings.ToUpper(strings.TrimSpace(s)), "0123456789 ")
+}
+
+func hasDrumWord(s string) bool {
+	ls := strings.ToLower(s)
+	for _, w := range drumWords {
+		if strings.Contains(ls, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// isDrumNote reads a note as percussion from its track name (cryptic abbreviation
+// or descriptive word) or its resolved instrument name — combining both signals,
+// since neither alone is reliable (a kick routed through a bass synth; a pad on a
+// drum-kit sampler).
+func isDrumNote(n Note) bool {
+	return drumTrackTokens[normTrackName(n.Track)] || hasDrumWord(n.Track) || hasDrumWord(n.InstrName)
+}
+
+func inListFold(list []string, name string) bool {
+	for _, x := range list {
+		if strings.EqualFold(strings.TrimSpace(x), name) {
+			return true
+		}
+	}
+	return false
 }
 
 // wantsTrack matches case-insensitively and ignores stray whitespace:
@@ -53,16 +111,17 @@ func (s *Song) checkTracks(sel Selection) error {
 			avail = append(avail, t.Name)
 		}
 	}
-	for _, want := range sel.Tracks {
+	want := append(append(append([]string{}, sel.Tracks...), sel.Drop...), sel.Keep...)
+	for _, w := range want {
 		found := false
 		for _, name := range avail {
-			if strings.EqualFold(strings.TrimSpace(want), name) {
+			if strings.EqualFold(strings.TrimSpace(w), name) {
 				found = true
 				break
 			}
 		}
 		if !found {
-			unknown = append(unknown, strings.TrimSpace(want))
+			unknown = append(unknown, strings.TrimSpace(w))
 		}
 	}
 	if len(unknown) > 0 {
@@ -70,6 +129,62 @@ func (s *Song) checkTracks(sel Selection) error {
 			strings.Join(unknown, ", "), strings.Join(avail, ", "))
 	}
 	return nil
+}
+
+// TrackStat summarises a note track for `info`: note count, dominant instrument,
+// and a guessed class (drum / fx? / melo) — a hint, not a verdict.
+type TrackStat struct {
+	Name  string
+	Notes int
+	Instr string
+	Class string
+}
+
+// TrackStats extracts the whole song once and summarises each note track, sorted
+// by note count, so the player sees at a glance what to drop for a melodic
+// reduction. drum wins over fx?; correct the guess with --drop / --keep.
+func (s *Song) TrackStats() ([]TrackStat, error) {
+	notes, err := s.Notes(Selection{From: 0, To: -1})
+	if err != nil {
+		return nil, err
+	}
+	type agg struct {
+		n     int
+		instr map[string]int
+		drum  bool
+	}
+	by := map[string]*agg{}
+	for _, n := range notes {
+		a := by[n.Track]
+		if a == nil {
+			a = &agg{instr: map[string]int{}}
+			by[n.Track] = a
+		}
+		a.n++
+		a.instr[n.InstrName]++
+		if isDrumNote(n) {
+			a.drum = true
+		}
+	}
+	var out []TrackStat
+	for name, a := range by {
+		top, topN := "", 0
+		for in, c := range a.instr {
+			if c > topN {
+				top, topN = in, c
+			}
+		}
+		class := "melo"
+		switch {
+		case a.drum:
+			class = "drum"
+		case a.n <= fxNoteThreshold:
+			class = "fx?"
+		}
+		out = append(out, TrackStat{Name: name, Notes: a.n, Instr: top, Class: class})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Notes > out[j].Notes })
+	return out, nil
 }
 
 // Notes extracts note events over the selected sequence range, in tracker
@@ -96,12 +211,26 @@ func (s *Song) Notes(sel Selection) ([]Note, error) {
 		}
 		pat := s.Patterns[patIdx]
 		for ti, pt := range pat.Tracks {
-			if ti >= len(s.Tracks) || s.Tracks[ti].Kind != "track" || !sel.wantsTrack(s.Tracks[ti].Name) {
+			if ti >= len(s.Tracks) || s.Tracks[ti].Kind != "track" {
 				continue
 			}
-			out = append(out, extractTrack(s, pt, pat.Lines, s.Tracks[ti].Name, pos, patIdx, lineOffset)...)
+			name := s.Tracks[ti].Name
+			if !sel.wantsTrack(name) || inListFold(sel.Drop, name) {
+				continue
+			}
+			out = append(out, extractTrack(s, pt, pat.Lines, name, pos, patIdx, lineOffset)...)
 		}
 		lineOffset += pat.Lines
+	}
+	if sel.NoDrums {
+		kept := out[:0]
+		for _, n := range out {
+			if isDrumNote(n) && !inListFold(sel.Keep, n.Track) {
+				continue
+			}
+			kept = append(kept, n)
+		}
+		out = kept
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Beat != out[j].Beat {
