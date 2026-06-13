@@ -26,6 +26,9 @@ func main() {
 	cmd, path := os.Args[1], os.Args[2]
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
 	tracks := fs.String("track", "", "comma-separated track names (default: all note tracks)")
+	drop := fs.String("drop", "", "comma-separated track names to exclude")
+	keep := fs.String("keep", "", "track names to force-keep despite --no-drums")
+	noDrums := fs.Bool("no-drums", false, "drop percussion (by track/instrument name) for a melodic reduction")
 	seq := fs.String("seq", "", `sequence range "A-B" or "A" (default: whole song)`)
 	fs.Parse(os.Args[3:])
 
@@ -42,7 +45,7 @@ func main() {
 	case "info":
 		info(song)
 	case "notes":
-		sel, err := selection(*tracks, *seq, song)
+		sel, err := selection(*tracks, *drop, *keep, *seq, *noDrums, song)
 		if err != nil {
 			fail(err)
 		}
@@ -54,7 +57,7 @@ func main() {
 		enc.SetIndent("", " ")
 		enc.Encode(notes)
 	case "play":
-		sel, err := selection(*tracks, *seq, song)
+		sel, err := selection(*tracks, *drop, *keep, *seq, *noDrums, song)
 		if err != nil {
 			fail(err)
 		}
@@ -72,10 +75,16 @@ func main() {
 	}
 }
 
-func selection(tracks, seq string, song *xrns.Song) (xrns.Selection, error) {
-	sel := xrns.Selection{From: 0, To: -1}
+func selection(tracks, drop, keep, seq string, noDrums bool, song *xrns.Song) (xrns.Selection, error) {
+	sel := xrns.Selection{From: 0, To: -1, NoDrums: noDrums}
 	if tracks != "" {
 		sel.Tracks = strings.Split(tracks, ",")
+	}
+	if drop != "" {
+		sel.Drop = strings.Split(drop, ",")
+	}
+	if keep != "" {
+		sel.Keep = strings.Split(keep, ",")
 	}
 	if seq != "" {
 		from, to, ok := strings.Cut(seq, "-")
@@ -95,11 +104,14 @@ func selection(tracks, seq string, song *xrns.Song) (xrns.Selection, error) {
 
 func info(s *xrns.Song) {
 	fmt.Printf("%s — %.1f BPM, %d lines/beat\n\n", orUntitled(s.Name), s.BPM, s.LPB)
-	fmt.Println("tracks:")
-	for i, t := range s.Tracks {
-		if t.Kind == "track" {
-			fmt.Printf("  %2d  %s\n", i, t.Name)
-		}
+	stats, err := s.TrackStats()
+	if err != nil {
+		fail(err)
+	}
+	fmt.Println("tracks (by note count · class is a hint, correct with --drop/--keep):")
+	fmt.Printf("  %-12s %6s  %-5s %s\n", "name", "notes", "class", "instrument")
+	for _, t := range stats {
+		fmt.Printf("  %-12s %6d  %-5s %s\n", t.Name, t.Notes, t.Class, t.Instr)
 	}
 	if len(s.Instruments) > 0 {
 		fmt.Println("\ninstruments:")
@@ -185,7 +197,10 @@ func fail(err error) {
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
   xrns7 info  <song.xrns>
-  xrns7 notes <song.xrns> [--track A,B] [--seq 0-3]
-  xrns7 play  <song.xrns> [--track A,B] [--seq 0-3]`)
+  xrns7 notes <song.xrns> [--track A,B] [--drop A,B] [--no-drums] [--keep A,B] [--seq 0-3]
+  xrns7 play  <song.xrns> [--track A,B] [--drop A,B] [--no-drums] [--keep A,B] [--seq 0-3]
+
+  --no-drums  drop percussion (track/instrument name heuristic) for a melodic reduction
+  --drop      exclude tracks by name      --keep  force-keep despite --no-drums`)
 	os.Exit(2)
 }

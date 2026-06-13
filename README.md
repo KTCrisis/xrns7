@@ -11,10 +11,21 @@ built for analysis pipelines and machine reading, where the in-Renoise
 tool (GUI-bound) doesn't fit.
 
 ```bash
-xrns7 info  song.xrns                          # song map: tracks, sequence, sections
+xrns7 info  song.xrns                          # song map: tracks (notes/class/instrument), sequence
 xrns7 notes song.xrns --track PADS --seq 0-3   # exact notes as JSON, positions in beats
 xrns7 play  song.xrns --track CELLO --seq 2-3  # play7-compatible sequence (see keys7)
+xrns7 play  song.xrns --no-drums --keep PAD2   # melodic piano reduction (drop percussion)
 ```
+
+## Melodic reduction
+
+`info` classes each track (note count, dominant instrument, a drum/fx/melo
+guess) so you can see what to drop. `--no-drums` drops percussion for a piano
+reduction, reading it from both the track name (cryptic abbreviations like
+`K`, `SN`, `H`) and the instrument name (`Battery`, `Kit`, `HAT`) — neither
+alone is reliable (a kick routed through a bass synth; a pad on a kit sampler).
+The guess is a hint: `--drop A,B` excludes tracks outright, `--keep A,B`
+force-keeps ones the heuristic over-eagerly tagged as drums.
 
 ## Output
 
