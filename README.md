@@ -10,6 +10,10 @@ built for analysis pipelines and machine reading, where the in-Renoise
 [MidiConvert](https://www.renoise.com/tools/midi-convert-w-extended-export)
 tool (GUI-bound) doesn't fit.
 
+xrns7 is the Renoise *read* side of the **keys7** machine ↔ music system (it
+feeds play7 sequences; ReMCP is the *write* side). See
+[ECOSYSTEM.md](https://github.com/KTCrisis/keys7/blob/main/ECOSYSTEM.md).
+
 ```bash
 xrns7 info  song.xrns                          # song map: tracks (notes/class/instrument), sequence
 xrns7 notes song.xrns --track PADS --seq 0-3   # exact notes as JSON, positions in beats
