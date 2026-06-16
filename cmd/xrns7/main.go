@@ -5,13 +5,16 @@
 //	xrns7 info song.xrns
 //	xrns7 notes song.xrns --track PADS --seq 0-3
 //	xrns7 play song.xrns --track CELLO --seq 0-1 | play.sh "$(cat)"
+//	xrns7 midi song.xrns --track CELLO,PADS -o out.mid
 package main
 
 import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,6 +33,7 @@ func main() {
 	keep := fs.String("keep", "", "track names to force-keep despite --no-drums")
 	noDrums := fs.Bool("no-drums", false, "drop percussion (by track/instrument name) for a melodic reduction")
 	seq := fs.String("seq", "", `sequence range "A-B" or "A" (default: whole song)`)
+	out := fs.String("o", "", `midi: output .mid path (default: <song>.mid; "-" = stdout)`)
 	fs.Parse(os.Args[3:])
 
 	song, err := xrns.Open(path)
@@ -65,13 +69,48 @@ func main() {
 		if err != nil {
 			fail(err)
 		}
-		out, err := playSequence(song, notes)
+		playOut, err := playSequence(song, notes)
 		if err != nil {
 			fail(err)
 		}
-		fmt.Println(out)
+		fmt.Println(playOut)
+	case "midi":
+		sel, err := selection(*tracks, *drop, *keep, *seq, *noDrums, song)
+		if err != nil {
+			fail(err)
+		}
+		notes, err := song.Notes(sel)
+		if err != nil {
+			fail(err)
+		}
+		writeMidi(song, notes, *out, path)
 	default:
 		usage()
+	}
+}
+
+// writeMidi resolves the output target (file, or "-" for stdout) and writes the
+// notes as a Standard MIDI File. Default target is the song's basename + .mid.
+func writeMidi(song *xrns.Song, notes []xrns.Note, out, path string) {
+	target := out
+	if target == "" {
+		base := filepath.Base(path)
+		target = strings.TrimSuffix(base, filepath.Ext(base)) + ".mid"
+	}
+	w := io.Writer(os.Stdout)
+	if target != "-" {
+		f, err := os.Create(target)
+		if err != nil {
+			fail(err)
+		}
+		defer f.Close()
+		w = f
+	}
+	if err := xrns.WriteSMF(w, notes, song.BPM); err != nil {
+		fail(err)
+	}
+	if target != "-" {
+		fmt.Fprintf(os.Stderr, "wrote %s (%d notes)\n", target, len(notes))
 	}
 }
 
@@ -199,8 +238,10 @@ func usage() {
   xrns7 info  <song.xrns>
   xrns7 notes <song.xrns> [--track A,B] [--drop A,B] [--no-drums] [--keep A,B] [--seq 0-3]
   xrns7 play  <song.xrns> [--track A,B] [--drop A,B] [--no-drums] [--keep A,B] [--seq 0-3]
+  xrns7 midi  <song.xrns> [--track A,B] [--drop A,B] [--no-drums] [--keep A,B] [--seq 0-3] [-o out.mid]
 
   --no-drums  drop percussion (track/instrument name heuristic) for a melodic reduction
-  --drop      exclude tracks by name      --keep  force-keep despite --no-drums`)
+  --drop      exclude tracks by name      --keep  force-keep despite --no-drums
+  -o          midi output path (default <song>.mid; "-" = stdout)`)
 	os.Exit(2)
 }

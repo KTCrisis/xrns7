@@ -19,6 +19,7 @@ xrns7 info  song.xrns                          # song map: tracks (notes/class/i
 xrns7 notes song.xrns --track PADS --seq 0-3   # exact notes as JSON, positions in beats
 xrns7 play  song.xrns --track CELLO --seq 2-3  # play7-compatible sequence (see keys7)
 xrns7 play  song.xrns --no-drums --keep PAD2   # melodic piano reduction (drop percussion)
+xrns7 midi  song.xrns --track CELLO,PADS -o out.mid  # Standard MIDI File (notation / DAW import)
 ```
 
 ## Melodic reduction
@@ -45,6 +46,21 @@ a MIDI instrument:
 ```bash
 play.sh "$(xrns7 play song.xrns --track CELLO --seq 2-3)"
 ```
+
+## MIDI export
+
+`midi` writes a Standard MIDI File (format 1): a conductor track with the song
+tempo, then one track per xrns track, notes positioned in ticks at 480 PPQ with
+their held durations and 1–127 velocities. Same `--track` / `--seq` /
+`--no-drums` selection as `notes` and `play`. Default output is `<song>.mid`;
+`-o path` overrides, `-o -` writes to stdout. Drum tracks keep melodic channels
+(channel 10 / GM percussion is skipped, since Renoise kits aren't GM-mapped).
+
+```bash
+xrns7 midi song.xrns --no-drums -o reduction.mid   # → import into MuseScore
+```
+
+This is the headless Renoise → notation bridge: no GUI, no MidiConvert.
 
 ## Semantics & limits
 
