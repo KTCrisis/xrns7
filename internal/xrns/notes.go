@@ -3,8 +3,23 @@ package xrns
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
+
+// delayFrac maps a Renoise delay-column cell (hex "00"–"FF") to a fraction of a
+// line in [0,1). Empty or unparsable = 0 (the note sits on the line). The delay
+// column nudges a note within its line; ignoring it quantises onsets to lines.
+func delayFrac(hex string) float64 {
+	if hex == "" {
+		return 0
+	}
+	v, err := strconv.ParseUint(strings.TrimSpace(hex), 16, 16)
+	if err != nil {
+		return 0
+	}
+	return float64(v) / 256.0
+}
 
 // Note is one extracted note event, positioned in beats.
 type Note struct {
@@ -187,10 +202,23 @@ func (s *Song) TrackStats() ([]TrackStat, error) {
 	return out, nil
 }
 
+// columnEvent is one cell in one tracker column, positioned at an absolute line
+// from the range start (so a column's events span every pattern in the range).
+type columnEvent struct {
+	absLine, localLine, seqPos, patIdx int
+	col                                NoteColumn
+}
+
+// colKey identifies a tracker column across the whole range: a given track's
+// column index is the same physical voice in every pattern.
+type colKey struct{ ti, ci int }
+
 // Notes extracts note events over the selected sequence range, in tracker
-// semantics: a note lasts until the next event in its column — another note,
-// an OFF — or the end of its pattern (v1 simplification: notes do not ring
-// across pattern boundaries). Beats are relative to the range start.
+// semantics: a note lasts until the next event in its column — another note or
+// an OFF — wherever it falls. A held note rings across pattern boundaries (and
+// through patterns where its column is empty) until that next event or the end
+// of the range. The delay column nudges onsets within a line. Beats are
+// relative to the range start.
 func (s *Song) Notes(sel Selection) ([]Note, error) {
 	if err := s.checkTracks(sel); err != nil {
 		return nil, err
@@ -202,7 +230,11 @@ func (s *Song) Notes(sel Selection) ([]Note, error) {
 		return nil, fmt.Errorf("bad sequence range %d-%d (song has %d entries)", sel.From, sel.To, len(s.Sequence))
 	}
 
-	var out []Note
+	// Build a per-column event timeline across the whole range. Absolute line
+	// positions turn "gap to the next event" — even one patterns away — into a
+	// plain subtraction, which is what lets a note sustain past its pattern.
+	events := map[colKey][]columnEvent{}
+	trackName := map[int]string{}
 	lineOffset := 0 // lines elapsed since range start
 	for pos := sel.From; pos <= sel.To; pos++ {
 		patIdx := s.Sequence[pos].Pattern
@@ -218,9 +250,64 @@ func (s *Song) Notes(sel Selection) ([]Note, error) {
 			if !sel.wantsTrack(name) || inListFold(sel.Drop, name) {
 				continue
 			}
-			out = append(out, extractTrack(s, pt, pat.Lines, name, pos, patIdx, lineOffset)...)
+			trackName[ti] = name
+			for _, l := range pt.Lines {
+				// Renoise keeps cell data beyond the pattern length in the XML
+				// (lines hidden by a pattern shrink) but never plays it: skip it,
+				// else it would yield phantom notes and bogus durations.
+				if l.Index >= pat.Lines {
+					continue
+				}
+				for ci, c := range l.Columns {
+					if c.Note == "" {
+						continue
+					}
+					k := colKey{ti: ti, ci: ci}
+					events[k] = append(events[k], columnEvent{
+						absLine:   lineOffset + l.Index,
+						localLine: l.Index,
+						seqPos:    pos,
+						patIdx:    patIdx,
+						col:       c,
+					})
+				}
+			}
 		}
 		lineOffset += pat.Lines
+	}
+	rangeLines := lineOffset // total lines: where an un-stopped note finally ends
+
+	var out []Note
+	for k, evs := range events {
+		sort.Slice(evs, func(i, j int) bool { return evs[i].absLine < evs[j].absLine })
+		for i, ev := range evs {
+			if ev.col.Note == "OFF" {
+				continue
+			}
+			midi, err := ParseNote(ev.col.Note)
+			if err != nil {
+				continue // unknown cell content; skip rather than fail the song
+			}
+			start := float64(ev.absLine) + delayFrac(ev.col.Delay)
+			end := float64(rangeLines)
+			if i+1 < len(evs) {
+				end = float64(evs[i+1].absLine) + delayFrac(evs[i+1].col.Delay)
+			}
+			out = append(out, Note{
+				Track:      trackName[k.ti],
+				Column:     k.ci,
+				SeqPos:     ev.seqPos,
+				Pattern:    ev.patIdx,
+				Line:       ev.localLine,
+				Beat:       start / float64(s.LPB),
+				Midi:       midi,
+				Name:       SciName(midi),
+				Vel:        Velocity(ev.col.Volume),
+				Beats:      (end - start) / float64(s.LPB),
+				Instrument: ev.col.Instrument,
+				InstrName:  s.InstrumentName(ev.col.Instrument),
+			})
+		}
 	}
 	if sel.NoDrums {
 		kept := out[:0]
@@ -242,64 +329,4 @@ func (s *Song) Notes(sel Selection) ([]Note, error) {
 		return out[i].Midi < out[j].Midi
 	})
 	return out, nil
-}
-
-// columnEvent is one cell in one column, used to compute durations.
-type columnEvent struct {
-	line int
-	col  NoteColumn
-}
-
-func extractTrack(s *Song, pt PatternTrack, patLines int, track string, seqPos, patIdx, lineOffset int) []Note {
-	// Group events per column index: each tracker column is monophonic, so
-	// duration = gap to the column's next event.
-	perCol := map[int][]columnEvent{}
-	for _, l := range pt.Lines {
-		// Renoise keeps cell data beyond the pattern length in the XML (lines
-		// hidden by a pattern shrink) but never plays it. Reading them would
-		// yield phantom notes past the pattern end and negative durations
-		// (end = patLines < line).
-		if l.Index >= patLines {
-			continue
-		}
-		for ci, c := range l.Columns {
-			if c.Note == "" {
-				continue
-			}
-			perCol[ci] = append(perCol[ci], columnEvent{line: l.Index, col: c})
-		}
-	}
-
-	var out []Note
-	for ci, evs := range perCol {
-		sort.Slice(evs, func(i, j int) bool { return evs[i].line < evs[j].line })
-		for i, ev := range evs {
-			if ev.col.Note == "OFF" {
-				continue
-			}
-			midi, err := ParseNote(ev.col.Note)
-			if err != nil {
-				continue // unknown cell content; skip rather than fail the song
-			}
-			end := patLines
-			if i+1 < len(evs) {
-				end = evs[i+1].line
-			}
-			out = append(out, Note{
-				Track:      track,
-				Column:     ci,
-				SeqPos:     seqPos,
-				Pattern:    patIdx,
-				Line:       ev.line,
-				Beat:       float64(lineOffset+ev.line) / float64(s.LPB),
-				Midi:       midi,
-				Name:       SciName(midi),
-				Vel:        Velocity(ev.col.Volume),
-				Beats:      float64(end-ev.line) / float64(s.LPB),
-				Instrument: ev.col.Instrument,
-				InstrName:  s.InstrumentName(ev.col.Instrument),
-			})
-		}
-	}
-	return out
 }
