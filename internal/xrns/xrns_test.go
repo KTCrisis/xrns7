@@ -136,10 +136,12 @@ func TestOpenAndNotes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// C-3 (cut by OFF at line 8), E-4 (cut by G-4), G-4 (to pattern end),
-	// D-3 in pattern 1 (offset 16 lines = beat 4). The A-3 at line 12 of
-	// pattern 1 (8 lines) is hidden data beyond the pattern length: Renoise
-	// never plays it, so it must not appear nor shorten D-3.
+	// C-3 (cut by OFF at line 8), E-4 (cut by G-4), G-4 (no OFF: rings across
+	// the boundary into pattern 1 where LEAD is empty, to the range end =
+	// beat 6, so 5 beats long), D-3 in pattern 1 (offset 16 lines = beat 4).
+	// The A-3 at line 12 of pattern 1 (8 lines) is hidden data beyond the
+	// pattern length: Renoise never plays it, so it must not appear nor
+	// shorten D-3.
 	type expect struct {
 		name  string
 		beat  float64
@@ -150,7 +152,7 @@ func TestOpenAndNotes(t *testing.T) {
 	want := []expect{
 		{"C2", 0, 2, 63, "BASS"},
 		{"E3", 0, 1, 127, "LEAD"},
-		{"G3", 1, 3, 31, "LEAD"},
+		{"G3", 1, 5, 31, "LEAD"},
 		{"D2", 4, 2, 127, "BASS"},
 	}
 	if len(notes) != len(want) {
@@ -161,6 +163,40 @@ func TestOpenAndNotes(t *testing.T) {
 		if n.Name != w.name || n.Beat != w.beat || n.Beats != w.beats || n.Vel != w.vel || n.Track != w.track {
 			t.Errorf("note %d = %+v, want %+v", i, n, w)
 		}
+	}
+}
+
+func TestDelayColumn(t *testing.T) {
+	// One LEAD track, one 8-line pattern, LPB 4. C-4 at line 0 carries delay 80
+	// (0x80 = half a line); E-4 sits plainly at line 4. The delay must shift
+	// C-4's onset by 0.5/4 beat and shorten its duration by the same amount.
+	const x = `<RenoiseSong doc_version="66">
+	  <GlobalSongData><BeatsPerMin>120</BeatsPerMin><LinesPerBeat>4</LinesPerBeat></GlobalSongData>
+	  <Tracks><SequencerTrack><Name>LEAD</Name></SequencerTrack></Tracks>
+	  <PatternPool><Patterns><Pattern><NumberOfLines>8</NumberOfLines><Tracks><PatternTrack><Lines>
+	    <Line index="0"><NoteColumns><NoteColumn><Note>C-4</Note><Delay>80</Delay></NoteColumn></NoteColumns></Line>
+	    <Line index="4"><NoteColumns><NoteColumn><Note>E-4</Note></NoteColumn></NoteColumns></Line>
+	  </Lines></PatternTrack></Tracks></Pattern></Patterns></PatternPool>
+	  <PatternSequence><SequenceEntries><SequenceEntry><Pattern>0</Pattern></SequenceEntry></SequenceEntries></PatternSequence>
+	</RenoiseSong>`
+	song, err := Parse(strings.NewReader(x))
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes, err := song.Notes(Selection{From: 0, To: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) != 2 {
+		t.Fatalf("got %d notes: %+v", len(notes), notes)
+	}
+	// C-4: onset 0.5 line = 0.125 beat; ends at E-4's onset (line 4) → 0.875 beat.
+	if notes[0].Name != "C3" || notes[0].Beat != 0.125 || notes[0].Beats != 0.875 {
+		t.Errorf("delayed note = %+v, want C3 beat 0.125 beats 0.875", notes[0])
+	}
+	// E-4: no delay, onset beat 1, rings to the range end (8 lines) → 1 beat.
+	if notes[1].Name != "E3" || notes[1].Beat != 1 || notes[1].Beats != 1 {
+		t.Errorf("plain note = %+v, want E3 beat 1 beats 1", notes[1])
 	}
 }
 

@@ -46,12 +46,17 @@ a MIDI instrument:
 play.sh "$(xrns7 play song.xrns --track CELLO --seq 2-3)"
 ```
 
-## Semantics & limits (v1)
+## Semantics & limits
 
 - Tracker durations: a note lasts until the next event in its column —
-  another note, an `OFF` — or the end of its pattern. Notes do not ring
-  across pattern boundaries (simplification).
-- The note delay column is ignored: positions quantize to lines.
+  another note or an `OFF` — wherever it falls. A held note rings across
+  pattern boundaries (and through patterns where its column is empty) until
+  that next event or the end of the selected range.
+- The note delay column is applied: a cell's delay (hex `00`–`FF`) nudges the
+  onset within its line by that fraction, and shortens the previous note to
+  match. Onsets are no longer quantized to lines.
+- Tempo and lines-per-beat are read once from the song globals; mid-song
+  tempo/LPB changes (`ZTxx`/`ZLxx` master effects) are not tracked.
 - Pitch mapping: Renoise `C-4` = MIDI 48 = scientific `C3` (the convention
   keys7/play7 use, A4 = 69 = 440 Hz).
 - Effect columns, automation, sample data: out of scope. This reads notes.
