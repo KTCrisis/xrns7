@@ -6,6 +6,7 @@
 //	xrns7 notes song.xrns --track PADS --seq 0-3
 //	xrns7 play song.xrns --track CELLO --seq 0-1 | play.sh "$(cat)"
 //	xrns7 midi song.xrns --track CELLO,PADS -o out.mid
+//	xrns7 sections song.xrns --seq 6-9
 package main
 
 import (
@@ -48,6 +49,18 @@ func main() {
 	switch cmd {
 	case "info":
 		info(song)
+	case "sections":
+		sel, err := selection("", "", "", *seq, false, song)
+		if err != nil {
+			fail(err)
+		}
+		spans, err := song.Spans(sel.From, sel.To)
+		if err != nil {
+			fail(err)
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", " ")
+		enc.Encode(map[string]any{"bpm": song.BPM, "lpb": song.LPB, "spans": spans})
 	case "notes":
 		sel, err := selection(*tracks, *drop, *keep, *seq, *noDrums, song)
 		if err != nil {
@@ -239,6 +252,7 @@ func usage() {
   xrns7 notes <song.xrns> [--track A,B] [--drop A,B] [--no-drums] [--keep A,B] [--seq 0-3]
   xrns7 play  <song.xrns> [--track A,B] [--drop A,B] [--no-drums] [--keep A,B] [--seq 0-3]
   xrns7 midi  <song.xrns> [--track A,B] [--drop A,B] [--no-drums] [--keep A,B] [--seq 0-3] [-o out.mid]
+  xrns7 sections <song.xrns> [--seq 0-3]   timeline JSON: entries in beats and seconds, with sections
 
   --no-drums  drop percussion (track/instrument name heuristic) for a melodic reduction
   --drop      exclude tracks by name      --keep  force-keep despite --no-drums

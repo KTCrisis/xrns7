@@ -20,7 +20,17 @@ xrns7 notes song.xrns --track PADS --seq 0-3   # exact notes as JSON, positions 
 xrns7 play  song.xrns --track CELLO --seq 2-3  # play7-compatible sequence (see keys7)
 xrns7 play  song.xrns --no-drums --keep PAD2   # melodic piano reduction (drop percussion)
 xrns7 midi  song.xrns --track CELLO,PADS -o out.mid  # Standard MIDI File (notation / DAW import)
+xrns7 sections song.xrns --seq 6-9             # timeline JSON: entries in beats and seconds, with sections
 ```
+
+## Sections
+
+`sections` lays the sequence entries on a timeline, in beats and seconds
+(from the song tempo), each tagged with its section. With `--seq`, time zero
+is the start of the range, the zero of an audio export of that same range,
+and an entry with no section of its own inherits the last one named before
+it, even outside the range. Built for audio visualizers that change palette
+on a section and camera on a pattern.
 
 ## Melodic reduction
 
