@@ -270,3 +270,32 @@ func TestInstrumentNames(t *testing.T) {
 		t.Errorf("InstrumentName(ZZ) = %q", got)
 	}
 }
+
+func TestSpans(t *testing.T) {
+	song, err := Open(writeFixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	spans, err := song.Spans(0, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 120 BPM, 4 LPB: pattern 0 = 16 lines = 4 beats = 2 s, pattern 1 = 8 lines = 1 s
+	if len(spans) != 2 || spans[1].StartBeat != 4 || spans[1].Start != 2 || spans[1].Duration != 1 {
+		t.Fatalf("spans = %+v", spans)
+	}
+	if !spans[0].SectionStart || spans[1].SectionStart || spans[1].Section != "START" {
+		t.Fatalf("sections = %+v", spans)
+	}
+	// a range starting mid-section inherits the name and opens on it, from time zero
+	tail, err := song.Spans(1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tail) != 1 || tail[0].Start != 0 || tail[0].Section != "START" || !tail[0].SectionStart {
+		t.Fatalf("tail = %+v", tail)
+	}
+	if _, err := song.Spans(2, 1); err == nil {
+		t.Fatal("inverted range accepted")
+	}
+}
